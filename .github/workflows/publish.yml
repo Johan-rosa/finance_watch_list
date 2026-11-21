@@ -33,6 +33,7 @@ jobs:
             any::quantmod
             any::highcharter
             any::htmltools
+            any::reactable
             any::lubridate
             any::xts
             any::rmarkdown
