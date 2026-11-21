@@ -5,8 +5,7 @@ suppressPackageStartupMessages(library(lubridate))
 PERIODS <- c(
   "1D"  = "1 day",    "5D"  = "5 days",  "1M"  = "1 month",
   "3M"  = "3 months", "6M"  = "6 months", "YTD" = "Year to date",
-  "1Y"  = "1 year",   "5Y"  = "5 years", "10Y" = "10 years",
-  "ALL" = "All time"
+  "1Y"  = "1 year",   "5Y"  = "5 years"
 )
 
 # Index of the row used as the starting point of each period.
@@ -25,9 +24,7 @@ period_start_row <- function(dates, period) {
     "6M"  = on_or_before(last %m-% months(6)),
     "YTD" = on_or_before(floor_date(last, "year") - 1),
     "1Y"  = on_or_before(last %m-% years(1)),
-    "5Y"  = on_or_before(last %m-% years(5)),
-    "10Y" = on_or_before(last %m-% years(10)),
-    "ALL" = 1L
+    "5Y"  = on_or_before(last %m-% years(5))
   )
 }
 

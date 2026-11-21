@@ -19,6 +19,11 @@ params:
 ---
 
 ```{r setup}
+# Make sure unicode (−, ↓, ↑) survives in non-UTF-8 shells / CI
+if (!l10n_info()$`UTF-8`) {
+  for (loc in c("en_US.UTF-8", "C.UTF-8")) if (nzchar(Sys.setlocale("LC_CTYPE", loc))) break
+}
+
 suppressPackageStartupMessages({
   library(highcharter)
   library(htmltools)
@@ -38,7 +43,9 @@ DEFAULT_PERIOD <- "1M"
 chart_id <- function(ticker) paste0("chart-", gsub("[^A-Za-z0-9]", "_", ticker))
 
 stock_chart <- function(stock, perf) {
+  # Only ship the longest period (5Y) to the browser
   p <- stock$prices
+  p <- p[index(p) >= as.Date(as.POSIXct(min(perf$min_ms) / 1000, tz = "UTC"))]
   ohlc <- p[, c("Open", "High", "Low", "Close")]
   default <- perf[perf$key == DEFAULT_PERIOD, ]
 
@@ -82,10 +89,11 @@ perf_strip <- function(stock, perf) {
   div(class = "perf-strip", buttons)
 }
 
-stock_section <- function(ticker) {
-  stock <- get_stock(ticker, ttl_hours = params$ttl_hours, force = isTRUE(params$refresh))
+section_id <- function(ticker) paste0("sec-", gsub("[^A-Za-z0-9]", "_", ticker))
+
+stock_section <- function(ticker, stock) {
   if (is.null(stock)) {
-    return(div(class = "stock-section",
+    return(div(class = "stock-section", id = section_id(ticker),
                h2(ticker), p(class = "error", "Could not load data for this ticker.")))
   }
   perf <- compute_performance(stock$prices)
@@ -95,6 +103,8 @@ stock_section <- function(ticker) {
 
   div(
     class = "stock-section",
+    id = section_id(ticker),
+    a(class = "back-top", href = "#summary", "↑ Summary"),
     div(
       class = "stock-header",
       h2(class = "stock-title", stock$name, span(class = "stock-ticker", ticker)),
@@ -102,7 +112,6 @@ stock_section <- function(ticker) {
         class = "stock-price",
         span(class = "price", formatC(as.numeric(last$Close), format = "f",
                                       digits = 2, big.mark = ",")),
-        span(class = "currency", stock$currency),
         span(class = paste("day-change", if (!is.na(day) && day < 0) "neg" else "pos"),
              format_pct(day)),
         span(class = "as-of", paste("Close", as_of))
@@ -114,33 +123,106 @@ stock_section <- function(ticker) {
 }
 ```
 
+```{r load-data}
+stocks <- setNames(lapply(tickers, get_stock,
+                          ttl_hours = params$ttl_hours,
+                          force = isTRUE(params$refresh)), tickers)
+```
+
+```{r summary-table}
+library(reactable)
+
+summary_df <- do.call(rbind, lapply(tickers, function(tk) {
+  s <- stocks[[tk]]
+  if (is.null(s)) return(NULL)
+  perf <- compute_performance(s$prices)
+  ret <- setNames(as.list(perf$ret), perf$key)
+  data.frame(ticker = tk, name = s$name,
+             price = as.numeric(tail(s$prices$Close, 1)),
+             currency = s$currency, ret, chart = section_id(tk),
+             check.names = FALSE, stringsAsFactors = FALSE)
+}))
+
+pct_col <- function(label) colDef(
+  name = label, minWidth = 90, align = "right",
+  sortNALast = TRUE,
+  cell = function(value) format_pct(value),
+  style = function(value) {
+    if (is.na(value)) list(color = "#9ca3af")
+    else list(color = if (value < 0) DOWN else UP, fontWeight = 500)
+  }
+)
+
+ret_cols <- setNames(lapply(unname(PERIODS), pct_col), names(PERIODS))
+
+div(
+  id = "summary",
+  h2(class = "summary-title", "Performance"),
+  reactable(
+    summary_df,
+    searchable = TRUE,
+    highlight = TRUE,
+    compact = TRUE,
+    defaultPageSize = 100,
+    defaultColDef = colDef(headerClass = "rt-head"),
+    columns = c(
+      list(
+        ticker = colDef(
+          name = "Ticker", minWidth = 80, sticky = "left",
+          cell = function(value) span(class = "rt-ticker", value)
+        ),
+        name = colDef(show = FALSE),
+        price = colDef(
+          name = "Price", minWidth = 85, align = "right",
+          cell = function(value) formatC(value, format = "f", digits = 2, big.mark = ",")
+        ),
+        currency = colDef(show = FALSE)
+      ),
+      ret_cols,
+      list(chart = colDef(
+        name = "", sortable = FALSE, minWidth = 80, align = "center",
+        cell = function(value) a(class = "rt-jump", href = paste0("#", value), "Chart ↓")
+      ))
+    )
+  )
+)
+```
+
 ```{r sections}
-tagList(lapply(tickers, stock_section))
+tagList(lapply(tickers, function(tk) stock_section(tk, stocks[[tk]])))
 ```
 
 ```{=html}
 <style>
-.stock-section { margin: 2.5rem 0 3.5rem; }
+.stock-section { margin: 2.5rem 0 3.5rem; scroll-margin-top: 1rem; }
+.back-top { font-size: .75rem; color: #6b7280; text-decoration: none; }
+.back-top:hover { color: #111; }
+#summary { scroll-margin-top: 1rem; margin-bottom: 2rem; }
+.summary-title { border: 0; font-weight: 600; font-size: 1.15rem; }
+#summary .reactable { font-size: .8rem; }
+.rt-head { font-weight: 500; color: #374151; }
+.rt-ticker { font-weight: 600; margin-right: .5rem; }
+.rt-jump { text-decoration: none; font-size: .95em; white-space: nowrap; }
 .stock-header { display: flex; flex-wrap: wrap; align-items: baseline;
   justify-content: space-between; gap: .5rem 2rem; margin-bottom: 1rem; }
-.stock-title { margin: 0; border: 0; font-weight: 600; }
-.stock-ticker { margin-left: .6rem; font-size: .55em; font-weight: 500;
+.stock-title { margin: 0; border: 0; font-weight: 600; font-size: 1.15rem; }
+.stock-price .day-change { font-size: .85rem; }
+.stock-ticker { margin-left: .5rem; font-size: .7em; font-weight: 500;
   color: #6b7280; letter-spacing: .03em; }
 .stock-price { display: flex; align-items: baseline; gap: .5rem; }
-.stock-price .price { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; }
-.stock-price .currency { color: #6b7280; font-size: .9rem; }
+.stock-price .price { font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .stock-price .day-change { font-weight: 600; font-variant-numeric: tabular-nums; }
-.stock-price .as-of { color: #9ca3af; font-size: .8rem; margin-left: .5rem; }
-.perf-strip { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr));
+.stock-price .as-of { color: #9ca3af; font-size: .72rem; margin-left: .5rem; }
+.perf-strip { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: .25rem; margin-bottom: 1rem; }
-@media (max-width: 900px) { .perf-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .perf-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .perf-btn { display: flex; flex-direction: column; align-items: center; gap: .2rem;
-  padding: .7rem .25rem; border: 0; border-radius: 10px; background: transparent;
+  padding: .45rem .2rem; border: 0; border-radius: 10px; background: transparent;
   cursor: pointer; font: inherit; transition: background .15s; }
 .perf-btn:hover { background: #f5f5f5; }
 .perf-btn.active { background: #efefef; }
-.perf-label { font-size: .95rem; color: #111; white-space: nowrap; }
-.perf-value { font-size: .95rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.perf-label { font-size: .78rem; color: #111; white-space: nowrap; }
+.perf-value { font-size: .8rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .pos { color: #0f8a6e; }
 .neg { color: #d1344b; }
 .flat { color: #9ca3af; }
