@@ -1,0 +1,163 @@
+---
+title: "Watch List"
+date: today
+format:
+  html:
+    page-layout: full
+    embed-resources: true
+    toc: false
+execute:
+  echo: false
+  warning: false
+  message: false
+params:
+  tickers: "SPY, AMZN, AAPL, MSFT, NVDA, MU, HOOD, AMD, META, GOOGL, OPEN, BE, NVDA, INTC, EQX, NOW, TEAM, OKTA, SNOW, APP, ETHA, GLD, MSTR"
+  # Hours a cached download is considered fresh
+  ttl_hours: 6
+  # Set to true to ignore the cache and re-download everything
+  refresh: false
+---
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(highcharter)
+  library(htmltools)
+})
+source("R/data_cache.R")
+source("R/performance.R")
+
+tickers <- toupper(trimws(unlist(strsplit(paste(params$tickers, collapse = ","), ","))))
+tickers <- unique(tickers[tickers != ""])
+
+UP   <- "#0f8a6e"
+DOWN <- "#d1344b"
+DEFAULT_PERIOD <- "1M"
+```
+
+```{r helpers}
+chart_id <- function(ticker) paste0("chart-", gsub("[^A-Za-z0-9]", "_", ticker))
+
+stock_chart <- function(stock, perf) {
+  p <- stock$prices
+  ohlc <- p[, c("Open", "High", "Low", "Close")]
+  default <- perf[perf$key == DEFAULT_PERIOD, ]
+
+  hc <- highchart(type = "stock") |>
+    hc_yAxis_multiples(create_yaxis(2, height = c(3, 1), turnopposite = TRUE)) |>
+    hc_add_series(ohlc, type = "candlestick", name = stock$ticker, yAxis = 0,
+                  color = DOWN, lineColor = DOWN,
+                  upColor = UP, upLineColor = UP) |>
+    hc_add_series(p$Volume, type = "column", name = "Volume", yAxis = 1,
+                  color = "#9aa5b1") |>
+    hc_rangeSelector(enabled = FALSE) |>
+    hc_navigator(enabled = TRUE) |>
+    hc_scrollbar(enabled = FALSE) |>
+    hc_tooltip(split = TRUE, valueDecimals = 2) |>
+    hc_chart(
+      height = 520,
+      events = list(load = JS(sprintf(
+        "function () { this.xAxis[0].setExtremes(%.0f, %.0f); }",
+        default$min_ms, attr(perf, "max_ms")
+      )))
+    )
+  hc$elementId <- chart_id(stock$ticker)
+  hc
+}
+
+perf_strip <- function(stock, perf) {
+  max_ms <- attr(perf, "max_ms")
+  buttons <- lapply(seq_len(nrow(perf)), function(i) {
+    r <- perf[i, ]
+    cls <- if (is.na(r$ret)) "flat" else if (r$ret < 0) "neg" else "pos"
+    tags$button(
+      type = "button",
+      class = paste("perf-btn", if (r$key == DEFAULT_PERIOD) "active"),
+      `data-chart` = chart_id(stock$ticker),
+      `data-min` = sprintf("%.0f", r$min_ms),
+      `data-max` = sprintf("%.0f", max_ms),
+      span(class = "perf-label", r$label),
+      span(class = paste("perf-value", cls), format_pct(r$ret))
+    )
+  })
+  div(class = "perf-strip", buttons)
+}
+
+stock_section <- function(ticker) {
+  stock <- get_stock(ticker, ttl_hours = params$ttl_hours, force = isTRUE(params$refresh))
+  if (is.null(stock)) {
+    return(div(class = "stock-section",
+               h2(ticker), p(class = "error", "Could not load data for this ticker.")))
+  }
+  perf <- compute_performance(stock$prices)
+  last <- tail(stock$prices, 1)
+  day  <- perf$ret[perf$key == "1D"]
+  as_of <- format(as.Date(index(last)), "%b %d, %Y")
+
+  div(
+    class = "stock-section",
+    div(
+      class = "stock-header",
+      h2(class = "stock-title", stock$name, span(class = "stock-ticker", ticker)),
+      div(
+        class = "stock-price",
+        span(class = "price", formatC(as.numeric(last$Close), format = "f",
+                                      digits = 2, big.mark = ",")),
+        span(class = "currency", stock$currency),
+        span(class = paste("day-change", if (!is.na(day) && day < 0) "neg" else "pos"),
+             format_pct(day)),
+        span(class = "as-of", paste("Close", as_of))
+      )
+    ),
+    perf_strip(stock, perf),
+    stock_chart(stock, perf)
+  )
+}
+```
+
+```{r sections}
+tagList(lapply(tickers, stock_section))
+```
+
+```{=html}
+<style>
+.stock-section { margin: 2.5rem 0 3.5rem; }
+.stock-header { display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: .5rem 2rem; margin-bottom: 1rem; }
+.stock-title { margin: 0; border: 0; font-weight: 600; }
+.stock-ticker { margin-left: .6rem; font-size: .55em; font-weight: 500;
+  color: #6b7280; letter-spacing: .03em; }
+.stock-price { display: flex; align-items: baseline; gap: .5rem; }
+.stock-price .price { font-size: 2rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stock-price .currency { color: #6b7280; font-size: .9rem; }
+.stock-price .day-change { font-weight: 600; font-variant-numeric: tabular-nums; }
+.stock-price .as-of { color: #9ca3af; font-size: .8rem; margin-left: .5rem; }
+.perf-strip { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: .25rem; margin-bottom: 1rem; }
+@media (max-width: 900px) { .perf-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.perf-btn { display: flex; flex-direction: column; align-items: center; gap: .2rem;
+  padding: .7rem .25rem; border: 0; border-radius: 10px; background: transparent;
+  cursor: pointer; font: inherit; transition: background .15s; }
+.perf-btn:hover { background: #f5f5f5; }
+.perf-btn.active { background: #efefef; }
+.perf-label { font-size: .95rem; color: #111; white-space: nowrap; }
+.perf-value { font-size: .95rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.pos { color: #0f8a6e; }
+.neg { color: #d1344b; }
+.flat { color: #9ca3af; }
+.error { color: #d1344b; }
+</style>
+
+<script>
+document.addEventListener("click", function (ev) {
+  const btn = ev.target.closest(".perf-btn");
+  if (!btn || !window.Highcharts) return;
+  const id = btn.dataset.chart;
+  const chart = Highcharts.charts.find(c => c && c.renderTo &&
+    (c.renderTo.id === id || c.renderTo.closest("#" + CSS.escape(id))));
+  if (!chart) return;
+  chart.xAxis[0].setExtremes(Number(btn.dataset.min), Number(btn.dataset.max));
+  btn.parentElement.querySelectorAll(".perf-btn")
+     .forEach(b => b.classList.toggle("active", b === btn));
+});
+</script>
+```

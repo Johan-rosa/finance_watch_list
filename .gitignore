@@ -1,0 +1,13 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Quarto output
+/.quarto/
+*_files/
+watch_list.html
+
+# Price cache
+data/cache/
+/_site/

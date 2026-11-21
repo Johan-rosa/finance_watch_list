@@ -1,0 +1,68 @@
+name: Publish watch list
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Weekdays after US market close (22:30 UTC)
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::quantmod
+            any::highcharter
+            any::htmltools
+            any::lubridate
+            any::xts
+            any::rmarkdown
+            any::knitr
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      # Price cache persists between runs (only new days are downloaded)
+      - uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: price-cache-${{ github.run_id }}
+          restore-keys: price-cache-
+
+      - name: Render
+        run: |
+          quarto render watch_list.qmd -P ttl_hours:0
+          mkdir -p _site
+          mv watch_list.html _site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
