@@ -11,7 +11,7 @@ execute:
   warning: false
   message: false
 params:
-  tickers: "SPY, AMZN, AAPL, MSFT, NVDA, MU, HOOD, AMD, META, GOOGL, OPEN, BE, NVDA, INTC, EQX, NOW, TEAM, OKTA, SNOW, APP, ETHA, GLD, MSTR"
+  tickers: "SPY, AMZN, AAPL, MSFT, NVDA, MU, HOOD, AMD, META, GOOGL, OPEN, BE, NVDA, INTC, EQX, NOW, TEAM, OKTA, SNOW, APP, ETHA, GLD, MSTR, USO, DELL, IBIT, ORCL, USO"
   # Hours a cached download is considered fresh
   ttl_hours: 6
   # Set to true to ignore the cache and re-download everything
